@@ -36,7 +36,17 @@ app.use('/api', apiRoutes);
 // Database connection
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
+    // Check for authentication in the connection string or provide default
+    let connectionString = process.env.MONGODB_URI;
+    
+    // If URI doesn't contain authentication and we have username/password in env
+    if (!connectionString.includes('@') && process.env.MONGO_USERNAME && process.env.MONGO_PASSWORD) {
+      const [protocol, rest] = connectionString.split('://');
+      connectionString = `${protocol}://${process.env.MONGO_USERNAME}:${process.env.MONGO_PASSWORD}@${rest}`;
+      console.log('Using authentication from environment variables');
+    }
+    
+    const conn = await mongoose.connect(connectionString, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     });

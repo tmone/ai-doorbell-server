@@ -26,22 +26,34 @@ const upload = multer({
   storage: storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB file size limit
   fileFilter: (req, file, cb) => {
+    console.log('Received file with mimetype:', file.mimetype, 'and originalname:', file.originalname);
+    
     // Check if the file is an image or video
-    const allowedImageTypes = /jpeg|jpg|png|webp/;
-    const allowedVideoTypes = /mp4|avi|mov|wmv|flv|mkv/;
+    const allowedImageMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    const allowedVideoMimeTypes = ['video/mp4', 'video/avi', 'video/quicktime', 'video/x-msvideo', 'video/x-flv', 'video/x-matroska'];
     const mimetype = file.mimetype;
     
+    // Check file extension as a fallback for octet-stream
+    const fileExtension = file.originalname.split('.').pop().toLowerCase();
+    const imageExtensions = ['jpg', 'jpeg', 'png', 'webp'];
+    const videoExtensions = ['mp4', 'avi', 'mov', 'wmv', 'flv', 'mkv'];
+    
     // Check if it's an image
-    if (mimetype.startsWith('image/') && allowedImageTypes.test(mimetype)) {
+    if (allowedImageMimeTypes.includes(mimetype) || 
+        (mimetype === 'application/octet-stream' && imageExtensions.includes(fileExtension))) {
       req.fileType = 'image';
       return cb(null, true);
     }
     
     // Check if it's a video
-    if (mimetype.startsWith('video/') && allowedVideoTypes.test(mimetype)) {
+    if (allowedVideoMimeTypes.includes(mimetype) || 
+        (mimetype === 'application/octet-stream' && videoExtensions.includes(fileExtension))) {
       req.fileType = 'video';
       return cb(null, true);
     }
+    
+    // For debugging
+    console.log('Rejected file with mimetype:', mimetype, 'and extension:', fileExtension);
     
     cb(new Error('Only image (JPEG, PNG, WebP) or video (MP4, AVI, MOV, etc.) files are supported!'));
   }
@@ -181,10 +193,7 @@ router.get('/employees/:id', async (req, res) => {
 
 // Create employee with face registration
 router.post('/employees', upload.array('faceImages', 5), async (req, res) => {
-  const session = await mongoose.startSession();
   try {
-    session.startTransaction();
-    
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({
         success: false,
@@ -207,6 +216,9 @@ router.post('/employees', upload.array('faceImages', 5), async (req, res) => {
       }
     };
     
+    // Create a new employee with a temporary face ID
+    const employeeId = new mongoose.Types.ObjectId();
+    
     const face = new Face({
       primaryImage: {
         data: primaryImage.buffer,
@@ -221,38 +233,33 @@ router.post('/employees', upload.array('faceImages', 5), async (req, res) => {
       featureVersion: '1.0', // Version of the face recognition model
       qualityScore: 0.95, // Placeholder score
       personType: 'employee',
-      // Will be set after employee creation
+      personId: employeeId // Set the employee ID in advance
     });
     
-    // Create the employee
+    // Save the face document
+    const savedFace = await face.save();
+    
+    // Create the employee with the saved face ID
     const employee = new Employee({
       ...req.body,
-      faceId: face._id
+      faceId: savedFace._id
     });
     
-    // Update the face with the employee ID
-    face.personId = employee._id;
-    
-    // Save both documents
-    await face.save({ session });
-    await employee.save({ session });
-    
-    await session.commitTransaction();
+    // Save the employee document
+    const savedEmployee = await employee.save();
     
     res.status(201).json({
       success: true,
-      data: employee
+      data: savedEmployee
     });
   } catch (error) {
-    await session.abortTransaction();
+    console.error('Error creating employee:', error);
     
     res.status(500).json({
       success: false,
       message: 'Error creating employee',
       error: error.message
     });
-  } finally {
-    session.endSession();
   }
 });
 
